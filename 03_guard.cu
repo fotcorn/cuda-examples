@@ -3,8 +3,9 @@
 
 __global__ void map(const int *in, int *out, const size_t n) {
     const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    printf("in: %d\n", in[idx]);
-    out[idx] = in[idx] + 10;
+    if (idx < n) {
+        out[idx] = in[idx] + 10;
+    }
 }
 
 #define CUDA_CHECK(call) do { \
@@ -36,7 +37,12 @@ int main() {
     // Copy the input array from the host to the device.
     CUDA_CHECK(cudaMemcpy(deviceIn, hostIn, n * sizeof(int), cudaMemcpyHostToDevice));
 
-    map<<<1, n>>>(deviceIn, deviceOut, n);
+    // Define the number of threads per block and the number of blocks.
+    const int threadsPerBlock = 256; // Standard value, good balance between resource usage (registers and shared memory) and performance.
+    const int blocks = (n + threadsPerBlock - 1) / threadsPerBlock;
+
+    std::cout << "blocks: " << blocks << ", threadsPerBlock: " << threadsPerBlock << std::endl;
+    map<<<blocks, threadsPerBlock>>>(deviceIn, deviceOut, n);
     CUDA_CHECK(cudaGetLastError()); // Check for any errors in the kernel launch.
     CUDA_CHECK(cudaDeviceSynchronize()); // Wait for all threads to complete.
 

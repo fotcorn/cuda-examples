@@ -12,4 +12,5 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 add_executable(01_map 01_map.cu)
 add_executable(02_zip 02_zip.cu)
+add_executable(03_guard 03_guard.cu)
 add_executable(device_info device_info.cu)

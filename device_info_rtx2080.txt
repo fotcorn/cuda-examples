@@ -1,0 +1,23 @@
+=== Device Information ===
+Device name: NVIDIA GeForce RTX 2080
+Multi-Processor Count: 46
+Concurrent Kernels: 1
+
+=== Memory Information ===
+Total Global Memory: 8353546240 bytes
+Total Constant Memory: 65536 bytes
+Shared Memory per Block: 49152 bytes
+Shared Memory per Multiprocessor: 65536 bytes
+Reserved Shared Memory per Block: 0 bytes
+Shared Memory per Block (Opt-in): 65536 bytes
+
+=== Thread and Block Information ===
+Max Threads per Block: 1024
+Max Threads per Multi-Processor: 1024
+Max Threads Dimension: 1024, 1024, 64
+Max Blocks per Multi-Processor: 16
+Max Grid Size: 2147483647, 65535, 65535
+
+=== Register Information ===
+Registers per Block: 65536
+Registers per Multiprocessor: 65536

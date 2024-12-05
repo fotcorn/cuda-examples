@@ -1,9 +1,12 @@
+
+
+
 #include <cuda_runtime.h>
 #include <iostream>
 
 __global__ void map(int *in, int *out, const size_t nx, const size_t ny) {
-    const size_t idx = threadIdx.x;
-    const size_t idy = threadIdx.y;
+    const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t idy = blockIdx.y * blockDim.y + threadIdx.y;
     const size_t index = idy * nx + idx;
 
     if (idx < nx && idy < ny) {
@@ -25,8 +28,8 @@ int main() {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
 
     // Initialize the input array on the host.
-    const size_t nx = 25;
-    const size_t ny = 30;
+    const size_t nx = 50;
+    const size_t ny = 72;
     int hostIn[ny][nx];
     int hostOut[ny][nx];
 
@@ -46,7 +49,10 @@ int main() {
 
     const int threads = 32; // 32 * 32 = 1024 threads, the maximum per block.
     dim3 threadsPerBlock(threads, threads);
-    dim3 blocks(1, 1);
+
+    const int numBlocksX = (nx + threads - 1) / threads;
+    const int numBlocksY = (ny + threads - 1) / threads;
+    dim3 blocks(numBlocksX, numBlocksY);
 
     std::cout << "blocks: (" << blocks.x << ", " << blocks.y << ", " << blocks.z << "), threadsPerBlock: (" << threadsPerBlock.x << ", " << threadsPerBlock.y << ", " << threadsPerBlock.z << ")" << std::endl;
 

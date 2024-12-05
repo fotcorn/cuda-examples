@@ -2,7 +2,7 @@
 #include <iostream>
 
 __global__ void map(const int *in, int *out, const size_t n) {
-    const size_t idx = threadIdx.x;
+    const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         out[idx] = in[idx] + 10;
     }
@@ -22,7 +22,7 @@ int main() {
     CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
 
     // Initialize the input array on the host.
-    const size_t n = 100;
+    const size_t n = 1353;
     int hostIn[n];
     int hostOut[n];
     for (size_t i = 0; i < n; i++) {
@@ -38,12 +38,11 @@ int main() {
     CUDA_CHECK(cudaMemcpy(deviceIn, hostIn, n * sizeof(int), cudaMemcpyHostToDevice));
 
     // Define the number of threads per block and the number of blocks.
-    // 256 Standard value, good balance between resource usage (registers and shared memory) and performance.
-    // Also, it's bigger than n, so we only need one block.
-    const int threadsPerBlock = 256; 
+    const int threadsPerBlock = 256;
+    const int blocks = (n + threadsPerBlock - 1) / threadsPerBlock;
 
-    std::cout << "blocks: " << 1 << ", threadsPerBlock: " << threadsPerBlock << std::endl;
-    map<<<1, threadsPerBlock>>>(deviceIn, deviceOut, n);
+    std::cout << "blocks: " << blocks << ", threadsPerBlock: " << threadsPerBlock << std::endl;
+    map<<<blocks, threadsPerBlock>>>(deviceIn, deviceOut, n);
     CUDA_CHECK(cudaGetLastError()); // Check for any errors in the kernel launch.
     CUDA_CHECK(cudaDeviceSynchronize()); // Wait for all threads to complete.
 

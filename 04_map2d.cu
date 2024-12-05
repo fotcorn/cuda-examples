@@ -44,7 +44,7 @@ int main() {
     // Copy the input array from the host to the device.
     CUDA_CHECK(cudaMemcpy(deviceIn, hostIn, nx * ny * sizeof(int), cudaMemcpyHostToDevice));
 
-    const int threads = 32;
+    const int threads = 32; // 32 * 32 = 1024 threads, the maximum per block.
     dim3 threadsPerBlock(threads, threads);
 
     const int numBlocksX = (nx + threads - 1) / threads;

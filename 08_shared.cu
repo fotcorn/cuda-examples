@@ -3,15 +3,17 @@
 
 __global__ void map(const int *in, int *out, const size_t n) {
     extern __shared__ int shared[];
-    const size_t idx = threadIdx.x;
 
-    if (idx < n) {
-        shared[idx] = in[idx] + 10;
-    }
-    __syncthreads();
+    // Global index into the full array.
+    const size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // Local index into the shared array. Shared memory is shared across threads in the same block.
+    const size_t localIdx = threadIdx.x;
 
+    // This doesn't really make sense, but it's an example of how to use shared memory.
     if (idx < n) {
-        out[idx] = shared[idx];
+        shared[localIdx] = in[idx] + 10;
+        __syncthreads();
+        out[idx] = shared[localIdx];
     }
 }
 

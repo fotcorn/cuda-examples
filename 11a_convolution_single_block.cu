@@ -18,13 +18,15 @@ __global__ void convolution1d(const int *a, const int *b, int *out, const size_t
 
     __syncthreads();
 
-    int sum = 0;
-    for (size_t i = 0; i < convSize; i++) {
-        if (localIdx + i < n) {
-            sum += shared[localIdx + i] * shared[i];
+    if (idx < n) {
+        int sum = 0;
+        for (size_t i = 0; i < convSize; i++) {
+            if (localIdx + i < n) {
+                sum += shared[localIdx + i] * shared[i];
+            }
         }
+        out[idx] = sum;
     }
-    out[idx] = sum;
 }
 
 

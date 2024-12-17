@@ -14,6 +14,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -G -g")
 endif()
 
-add_executable(device_info device_info.cu)
+add_subdirectory(vendor/fmt)
 
+add_executable(device_info device_info.cu)
+add_subdirectory(mnist)
 add_subdirectory(gpu-puzzles)

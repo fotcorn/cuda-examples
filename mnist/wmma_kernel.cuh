@@ -19,18 +19,20 @@ constexpr int WMMA_K = 16;
     } \
 } while (0)
 
-__global__ void wmma_matrix_multiply(const half* a, const half* b, float* c, 
+__global__ void wmma_matrix_multiply(const half* a, const half* b, const float* bias, float* c, 
                                    int M, int K, int N) {
     // Each warp computes a 16x16 output tile
     // Calculate the warp's position
     const int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
     const int warpN = blockIdx.y;  // Each block.y handles one 16xN tile
 
-    // Initialize accumulator with zeros
+    // Initialize fragments
     wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> a_frag;
     wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> b_frag;
     wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-    wmma::fill_fragment(c_frag, 0.0f);
+
+    // Initialize accumulator with bias values
+    wmma::load_matrix_sync(c_frag, bias + warpN * WMMA_N, N, wmma::mem_row_major);
 
     // Loop over K dimension
     for (int i = 0; i < K; i += WMMA_K) {

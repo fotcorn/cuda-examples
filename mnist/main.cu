@@ -70,13 +70,15 @@ int main(int argc, char *argv[]) {
   }
 
   half *d_images, *d_weights;
-  float *d_output;
+  float *d_output, *d_bias;
   CUDA_CHECK(cudaMalloc(&d_images, stackedImages.size * sizeof(half)));
   CUDA_CHECK(cudaMalloc(&d_weights, l0w.size * sizeof(half)));
   CUDA_CHECK(cudaMalloc(&d_output, M * N * sizeof(float)));
+  CUDA_CHECK(cudaMalloc(&d_bias, N * sizeof(float)));
 
   CUDA_CHECK(cudaMemcpy(d_images, h_images.data(), h_images.size() * sizeof(half), cudaMemcpyHostToDevice));
   CUDA_CHECK(cudaMemcpy(d_weights, h_weights.data(), h_weights.size() * sizeof(half), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(d_bias, l0b.data.get(), N * sizeof(float), cudaMemcpyHostToDevice));
 
   // Launch kernel
   dim3 gridDim((M + WMMA_M - 1) / WMMA_M, (N + WMMA_N - 1) / WMMA_N);
@@ -85,7 +87,7 @@ int main(int argc, char *argv[]) {
   fmt::println("Grid dimensions: {}x{}", gridDim.x, gridDim.y);
   fmt::println("Block dimensions: {}x{}", blockDim.x, blockDim.y);
 
-  wmma_matrix_multiply<<<gridDim, blockDim>>>(d_images, d_weights, d_output, M, K, N);
+  wmma_matrix_multiply<<<gridDim, blockDim>>>(d_images, d_weights, d_bias, d_output, M, K, N);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -104,6 +106,7 @@ int main(int argc, char *argv[]) {
   CUDA_CHECK(cudaFree(d_images));
   CUDA_CHECK(cudaFree(d_weights));
   CUDA_CHECK(cudaFree(d_output));
+  CUDA_CHECK(cudaFree(d_bias));
 
   return 0;
 }

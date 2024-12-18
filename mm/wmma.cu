@@ -91,6 +91,11 @@ int main() {
     // Launch kernel
     dim3 gridDim((M + WMMA_M - 1) / WMMA_M, (N + WMMA_N - 1) / WMMA_N);
     dim3 blockDim(32, 1);  // One warp per block
+
+    std::cout << "Matrix sizes: " << M << "x" << K << " * " << K << "x" << N << " = " << M << "x" << N << std::endl;
+    std::cout << "Grid dimensions: " << gridDim.x << "x" << gridDim.y << std::endl;
+    std::cout << "Block dimensions: " << blockDim.x << "x" << blockDim.y << std::endl;
+
     wmma_matrix_multiply<<<gridDim, blockDim>>>(d_a, d_b, d_c);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());

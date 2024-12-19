@@ -19,7 +19,9 @@ constexpr int WMMA_K = 16;
     } \
 } while (0)
 
-__global__ void wmma_matrix_multiply(const half* a, const half* b, const float* bias, float* c, 
+
+template <bool ReLU>
+__global__ void linear_layer_forward(const half* a, const half* b, const float* bias, float* c, 
                                    int M, int K, int N) {
     // Each warp computes a 16x16 output tile
     // Calculate the warp's position
@@ -42,6 +44,13 @@ __global__ void wmma_matrix_multiply(const half* a, const half* b, const float* 
         
         // Perform the matrix multiplication
         wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+    }
+
+    if (ReLU) {
+        // ReLU
+        for (int i = 0; i < c_frag.num_elements; i++) {
+            c_frag.x[i] = max(0.0f, c_frag.x[i]);
+        }
     }
 
     // Store the output

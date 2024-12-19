@@ -1,6 +1,6 @@
 #include "cppdl/mnist_utils.h"
 #include "cppdl/serialization.h"
-#include "wmma_kernel.cuh"
+#include "linear_layer.cuh"
 
 #include <fstream>
 #include <iostream>
@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
   fmt::println("Grid dimensions: {}x{}", gridDim.x, gridDim.y);
   fmt::println("Block dimensions: {}x{}", blockDim.x, blockDim.y);
 
-  wmma_matrix_multiply<<<gridDim, blockDim>>>(d_images, d_weights, d_bias, d_output, M, K, N);
+  linear_layer_forward<true><<<gridDim, blockDim>>>(d_images, d_weights, d_bias, d_output, M, K, N);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 

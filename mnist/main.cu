@@ -59,24 +59,18 @@ int main(int argc, char *argv[]) {
   // Load weights
   auto l0w = deserializeTensor<float>(file).value().transpose();
   auto l0b = deserializeTensor<float>(file).value();
-  auto l1w = deserializeTensor<float>(file).value();
+  auto l1w = deserializeTensor<float>(file).value().transpose();
   auto l1b = deserializeTensor<float>(file).value();
-  auto l2w = deserializeTensor<float>(file).value();
+  auto l2w = deserializeTensor<float>(file).value().transpose();
   auto l2b = deserializeTensor<float>(file).value();
 
-  fmt::println("l0w shape: {}", l0w.shape);
+  auto [d_weights_l0, d_bias_l0] = uploadWeightsAndBias(l0w, l0b);
+  auto [d_weights_l1, d_bias_l1] = uploadWeightsAndBias(l1w, l1b);
+  auto [d_weights_l2, d_bias_l2] = uploadWeightsAndBias(l2w, l2b);
 
   // Stack first 25 images
   std::vector<Tensor<float>> first25Images(rawValidationImages.begin(), rawValidationImages.begin() + 25);
   auto stackedImages = Tensor<float>::stack(first25Images.begin(), first25Images.end());
-  fmt::println("Stacked images shape: {}", stackedImages.shape);
-
-  // Get matrix dimensions from tensor shapes
-  const int M = stackedImages.shape[0];  // Number of images (25)
-  const int K = stackedImages.shape[1];  // Image size (784)
-  const int N = l0w.shape[1];           // Output features (16)
-
-  fmt::println("Matrix dimensions: {}x{} * {}x{} = {}x{}", M, K, K, N, M, N);
 
   // Convert tensors to half precision and allocate device memory
   std::vector<half> h_images(stackedImages.size);
@@ -85,28 +79,27 @@ int main(int argc, char *argv[]) {
   }
 
   half *d_images;
-  float *d_output;
   CUDA_CHECK(cudaMalloc(&d_images, stackedImages.size * sizeof(half)));
-  CUDA_CHECK(cudaMalloc(&d_output, M * N * sizeof(float)));
-
-  auto [d_weights, d_bias] = uploadWeightsAndBias(l0w, l0b);
-
   CUDA_CHECK(cudaMemcpy(d_images, h_images.data(), h_images.size() * sizeof(half), cudaMemcpyHostToDevice));
 
-  // Launch kernel
-  dim3 gridDim((M + WMMA_M - 1) / WMMA_M, (N + WMMA_N - 1) / WMMA_N);
-  dim3 blockDim(32, 1);  // One warp per block
+  const int BATCH_SIZE = stackedImages.shape[0];  // Number of images (25)
+  const int IMAGE_SIZE = stackedImages.shape[1];  // Image size (784)
+  const int NUM_FEATURES = l0w.shape[1];           // Output features (16)
 
-  fmt::println("Grid dimensions: {}x{}", gridDim.x, gridDim.y);
-  fmt::println("Block dimensions: {}x{}", blockDim.x, blockDim.y);
+  // Linear layer 0
+  float *d_output_l0;
+  CUDA_CHECK(cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(float)));
 
-  linear_layer_forward<true><<<gridDim, blockDim>>>(d_images, d_weights, d_bias, d_output, M, K, N);
+  dim3 gridDim((BATCH_SIZE + WMMA_M - 1) / WMMA_M, (NUM_FEATURES + WMMA_N - 1) / WMMA_N);
+  dim3 blockDim(32, 1);
+
+  linear_layer_forward<true><<<gridDim, blockDim>>>(d_images, d_weights_l0, d_bias_l0, d_output_l0, BATCH_SIZE, IMAGE_SIZE, NUM_FEATURES);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
   // Copy result back to host
-  std::vector<float> h_output(M * N);
-  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output, h_output.size() * sizeof(float), cudaMemcpyDeviceToHost));
+  std::vector<float> h_output(BATCH_SIZE * NUM_FEATURES);
+  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l0, h_output.size() * sizeof(float), cudaMemcpyDeviceToHost));
 
   // Print first few elements of result
   fmt::println("First few elements of result:");
@@ -117,9 +110,9 @@ int main(int argc, char *argv[]) {
 
   // Cleanup
   CUDA_CHECK(cudaFree(d_images));
-  CUDA_CHECK(cudaFree(d_weights));
-  CUDA_CHECK(cudaFree(d_output));
-  CUDA_CHECK(cudaFree(d_bias));
+  CUDA_CHECK(cudaFree(d_weights_l0));
+  CUDA_CHECK(cudaFree(d_output_l0));
+  CUDA_CHECK(cudaFree(d_bias_l0));
 
   return 0;
 }

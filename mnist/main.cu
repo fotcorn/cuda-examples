@@ -6,6 +6,25 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <utility>
+
+// Helper function to upload weights and bias to GPU
+std::pair<half*, float*> uploadWeightsAndBias(const Tensor<float>& weights, const Tensor<float>& bias) {
+    std::vector<half> h_weights(weights.size);
+    for (size_t i = 0; i < weights.size; i++) {
+        h_weights[i] = __float2half(weights.data[i]);
+    }
+
+    half* d_weights;
+    float* d_bias;
+    CUDA_CHECK(cudaMalloc(&d_weights, weights.size * sizeof(half)));
+    CUDA_CHECK(cudaMalloc(&d_bias, bias.size * sizeof(float)));
+
+    CUDA_CHECK(cudaMemcpy(d_weights, h_weights.data(), h_weights.size() * sizeof(half), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_bias, bias.data.get(), bias.size * sizeof(float), cudaMemcpyHostToDevice));
+
+    return {d_weights, d_bias};
+}
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
@@ -61,24 +80,18 @@ int main(int argc, char *argv[]) {
 
   // Convert tensors to half precision and allocate device memory
   std::vector<half> h_images(stackedImages.size);
-  std::vector<half> h_weights(l0w.size);
   for (size_t i = 0; i < stackedImages.size; i++) {
     h_images[i] = __float2half(stackedImages.data[i]);
   }
-  for (size_t i = 0; i < l0w.size; i++) {
-    h_weights[i] = __float2half(l0w.data[i]);
-  }
 
-  half *d_images, *d_weights;
-  float *d_output, *d_bias;
+  half *d_images;
+  float *d_output;
   CUDA_CHECK(cudaMalloc(&d_images, stackedImages.size * sizeof(half)));
-  CUDA_CHECK(cudaMalloc(&d_weights, l0w.size * sizeof(half)));
   CUDA_CHECK(cudaMalloc(&d_output, M * N * sizeof(float)));
-  CUDA_CHECK(cudaMalloc(&d_bias, N * sizeof(float)));
+
+  auto [d_weights, d_bias] = uploadWeightsAndBias(l0w, l0b);
 
   CUDA_CHECK(cudaMemcpy(d_images, h_images.data(), h_images.size() * sizeof(half), cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(d_weights, h_weights.data(), h_weights.size() * sizeof(half), cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(d_bias, l0b.data.get(), N * sizeof(float), cudaMemcpyHostToDevice));
 
   // Launch kernel
   dim3 gridDim((M + WMMA_M - 1) / WMMA_M, (N + WMMA_N - 1) / WMMA_N);

@@ -5,25 +5,29 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 // Helper function to upload weights and bias to GPU
-std::pair<half*, float*> uploadWeightsAndBias(const Tensor<float>& weights, const Tensor<float>& bias) {
-    std::vector<half> h_weights(weights.size);
-    for (size_t i = 0; i < weights.size; i++) {
-        h_weights[i] = __float2half(weights.data[i]);
-    }
+std::pair<half *, float *> uploadWeightsAndBias(const Tensor<float> &weights,
+                                                const Tensor<float> &bias) {
+  std::vector<half> h_weights(weights.size);
+  for (size_t i = 0; i < weights.size; i++) {
+    h_weights[i] = __float2half(weights.data[i]);
+  }
 
-    half* d_weights;
-    float* d_bias;
-    CUDA_CHECK(cudaMalloc(&d_weights, weights.size * sizeof(half)));
-    CUDA_CHECK(cudaMalloc(&d_bias, bias.size * sizeof(float)));
+  half *d_weights;
+  float *d_bias;
+  CUDA_CHECK(cudaMalloc(&d_weights, weights.size * sizeof(half)));
+  CUDA_CHECK(cudaMalloc(&d_bias, bias.size * sizeof(float)));
 
-    CUDA_CHECK(cudaMemcpy(d_weights, h_weights.data(), h_weights.size() * sizeof(half), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_bias, bias.data.get(), bias.size * sizeof(float), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(d_weights, h_weights.data(),
+                        h_weights.size() * sizeof(half),
+                        cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(d_bias, bias.data.get(), bias.size * sizeof(float),
+                        cudaMemcpyHostToDevice));
 
-    return {d_weights, d_bias};
+  return {d_weights, d_bias};
 }
 
 int main(int argc, char *argv[]) {
@@ -36,7 +40,8 @@ int main(int argc, char *argv[]) {
   cudaDeviceProp prop;
   CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
   if (prop.major < 7) {
-    std::cerr << "Device needs to support CUDA compute capability 7.0 or higher\n";
+    std::cerr
+        << "Device needs to support CUDA compute capability 7.0 or higher\n";
     return 1;
   }
 
@@ -69,8 +74,10 @@ int main(int argc, char *argv[]) {
   auto [d_weights_l2, d_bias_l2] = uploadWeightsAndBias(l2w, l2b);
 
   // Stack first 25 images
-  std::vector<Tensor<float>> first25Images(rawValidationImages.begin(), rawValidationImages.begin() + 25);
-  auto stackedImages = Tensor<float>::stack(first25Images.begin(), first25Images.end());
+  std::vector<Tensor<float>> first25Images(rawValidationImages.begin(),
+                                           rawValidationImages.begin() + 25);
+  auto stackedImages =
+      Tensor<float>::stack(first25Images.begin(), first25Images.end());
 
   // Convert tensors to half precision and allocate device memory
   std::vector<half> h_images(stackedImages.size);
@@ -80,26 +87,34 @@ int main(int argc, char *argv[]) {
 
   half *d_images;
   CUDA_CHECK(cudaMalloc(&d_images, stackedImages.size * sizeof(half)));
-  CUDA_CHECK(cudaMemcpy(d_images, h_images.data(), h_images.size() * sizeof(half), cudaMemcpyHostToDevice));
+  CUDA_CHECK(cudaMemcpy(d_images, h_images.data(),
+                        h_images.size() * sizeof(half),
+                        cudaMemcpyHostToDevice));
 
-  const int BATCH_SIZE = stackedImages.shape[0];  // Number of images (25)
-  const int IMAGE_SIZE = stackedImages.shape[1];  // Image size (784)
-  const int NUM_FEATURES = l0w.shape[1];           // Output features (16)
+  const int BATCH_SIZE = stackedImages.shape[0]; // Number of images (25)
+  const int IMAGE_SIZE = stackedImages.shape[1]; // Image size (784)
+  const int NUM_FEATURES = l0w.shape[1];         // Output features (16)
 
   // Linear layer 0
   float *d_output_l0;
-  CUDA_CHECK(cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(float)));
+  CUDA_CHECK(
+      cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(float)));
 
-  dim3 gridDim((BATCH_SIZE + WMMA_M - 1) / WMMA_M, (NUM_FEATURES + WMMA_N - 1) / WMMA_N);
+  dim3 gridDim((BATCH_SIZE + WMMA_M - 1) / WMMA_M,
+               (NUM_FEATURES + WMMA_N - 1) / WMMA_N);
   dim3 blockDim(32, 1);
 
-  linear_layer_forward<true><<<gridDim, blockDim>>>(d_images, d_weights_l0, d_bias_l0, d_output_l0, BATCH_SIZE, IMAGE_SIZE, NUM_FEATURES);
+  linear_layer_forward<true>
+      <<<gridDim, blockDim>>>(d_images, d_weights_l0, d_bias_l0, d_output_l0,
+                              BATCH_SIZE, IMAGE_SIZE, NUM_FEATURES);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
   // Copy result back to host
   std::vector<float> h_output(BATCH_SIZE * NUM_FEATURES);
-  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l0, h_output.size() * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l0,
+                        h_output.size() * sizeof(float),
+                        cudaMemcpyDeviceToHost));
 
   // Print first few elements of result
   fmt::println("First few elements of result:");

@@ -96,9 +96,9 @@ int main(int argc, char *argv[]) {
   const int NUM_FEATURES = l0w.shape[1];         // Output features (16)
 
   // Linear layer 0
-  float *d_output_l0;
+  half *d_output_l0;
   CUDA_CHECK(
-      cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(float)));
+      cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(half)));
 
   dim3 gridDim((BATCH_SIZE + WMMA_M - 1) / WMMA_M,
                (NUM_FEATURES + WMMA_N - 1) / WMMA_N);
@@ -111,15 +111,15 @@ int main(int argc, char *argv[]) {
   CUDA_CHECK(cudaDeviceSynchronize());
 
   // Copy result back to host
-  std::vector<float> h_output(BATCH_SIZE * NUM_FEATURES);
+  std::vector<half> h_output(BATCH_SIZE * NUM_FEATURES);
   CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l0,
-                        h_output.size() * sizeof(float),
+                        h_output.size() * sizeof(half),
                         cudaMemcpyDeviceToHost));
 
   // Print first few elements of result
   fmt::println("First few elements of result:");
   for (int i = 0; i < 5; ++i) {
-    fmt::print("{} ", h_output[i]);
+    fmt::print("{} ", __half2float(h_output[i]));
   }
   fmt::println("");
 

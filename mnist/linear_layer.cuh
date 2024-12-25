@@ -23,7 +23,7 @@ constexpr int WMMA_K = 16;
 
 template <bool ReLU>
 __global__ void linear_layer_forward(const half *a, const half *b,
-                                     const float *bias, float *c, int M, int K,
+                                     const float *bias, half *c, int M, int K,
                                      int N) {
   // Each warp computes a 16x16 output tile
   // Calculate the warp's position
@@ -57,7 +57,7 @@ __global__ void linear_layer_forward(const half *a, const half *b,
     }
   }
 
-  // Store the output
-  wmma::store_matrix_sync(c + warpM * WMMA_M * N + warpN * WMMA_N, c_frag, N,
-                          wmma::mem_row_major);
+  for (int i = 0; i < c_frag.num_elements; i++) {
+    c[warpM * WMMA_M * N + warpN * WMMA_N + i] = __float2half(c_frag.x[i]);
+  }
 }

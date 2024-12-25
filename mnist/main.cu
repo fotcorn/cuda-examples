@@ -79,6 +79,8 @@ int main(int argc, char *argv[]) {
   auto stackedImages =
       Tensor<float>::stack(first25Images.begin(), first25Images.end());
 
+  const int NUM_CLASSES = 10;
+
   // Convert tensors to half precision and allocate device memory
   std::vector<half> h_images(stackedImages.size);
   for (size_t i = 0; i < stackedImages.size; i++) {
@@ -110,24 +112,95 @@ int main(int argc, char *argv[]) {
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
+  // Add this code to print layer 0 output
+  std::vector<half> h_output_l0(BATCH_SIZE * NUM_FEATURES);
+  CUDA_CHECK(cudaMemcpy(h_output_l0.data(), d_output_l0,
+                        h_output_l0.size() * sizeof(half),
+                        cudaMemcpyDeviceToHost));
+  fmt::println("Layer 0 first 5 outputs:");
+  for (int i = 0; i < 5; ++i) {
+    fmt::print("{:.4f} ", __half2float(h_output_l0[i]));
+  }
+  fmt::println("\n");
+
+  half *d_output_l1;
+  CUDA_CHECK(
+      cudaMalloc(&d_output_l1, BATCH_SIZE * NUM_FEATURES * sizeof(half)));
+  linear_layer_forward<true>
+      <<<gridDim, blockDim>>>(d_output_l0, d_weights_l1, d_bias_l1, d_output_l1,
+                              BATCH_SIZE, NUM_FEATURES, NUM_FEATURES);
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Add this code to print layer 1 output
+  std::vector<half> h_output_l1(BATCH_SIZE * NUM_FEATURES);
+  CUDA_CHECK(cudaMemcpy(h_output_l1.data(), d_output_l1,
+                        h_output_l1.size() * sizeof(half),
+                        cudaMemcpyDeviceToHost));
+  fmt::println("Layer 1 first 5 outputs:");
+  for (int i = 0; i < 5; ++i) {
+    fmt::print("{:.4f} ", __half2float(h_output_l1[i]));
+  }
+  fmt::println("\n");
+
+  half *d_output_l2;
+  CUDA_CHECK(
+      cudaMalloc(&d_output_l2, BATCH_SIZE * NUM_CLASSES * sizeof(half)));
+  linear_layer_forward<false>
+      <<<gridDim, blockDim>>>(d_output_l1, d_weights_l2, d_bias_l2, d_output_l2,
+                              BATCH_SIZE, NUM_FEATURES, NUM_CLASSES);
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  // Add this code to print layer 2 output (before the existing output copy)
+  std::vector<half> h_output_l2(BATCH_SIZE * NUM_CLASSES);
+  CUDA_CHECK(cudaMemcpy(h_output_l2.data(), d_output_l2,
+                        h_output_l2.size() * sizeof(half),
+                        cudaMemcpyDeviceToHost));
+  fmt::println("Layer 2 first 5 outputs:");
+  for (int i = 0; i < 5; ++i) {
+    fmt::print("{:.4f} ", __half2float(h_output_l2[i]));
+  }
+  fmt::println("\n");
+
   // Copy result back to host
-  std::vector<half> h_output(BATCH_SIZE * NUM_FEATURES);
-  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l0,
+  std::vector<half> h_output(BATCH_SIZE * NUM_CLASSES);
+  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l2,
                         h_output.size() * sizeof(half),
                         cudaMemcpyDeviceToHost));
 
   // Print first few elements of result
-  fmt::println("First few elements of result:");
-  for (int i = 0; i < 5; ++i) {
-    fmt::print("{} ", __half2float(h_output[i]));
+  fmt::println("Predictions vs Labels:");
+  for (int i = 0; i < BATCH_SIZE; ++i) {
+    // Find argmax for predictions
+    int pred_class = 0;
+    float max_val = __half2float(h_output[i * NUM_CLASSES]);
+    for (int j = 1; j < NUM_CLASSES; ++j) {
+      float val = __half2float(h_output[i * NUM_CLASSES + j]);
+      fmt::print("{} ", val);
+      if (val > max_val) {
+        max_val = val;
+        pred_class = j;
+      }
+    }
+    fmt::println("");
+
+    fmt::print("Image {}: Predicted {} | Actual {}\n", i, pred_class, rawValidationLabels[i].argmax(0).data[0]);
   }
-  fmt::println("");
+
+  fmt::println("Raw validation labels tensor shape: {}", rawValidationLabels[0].shape);
 
   // Cleanup
   CUDA_CHECK(cudaFree(d_images));
   CUDA_CHECK(cudaFree(d_weights_l0));
+  CUDA_CHECK(cudaFree(d_weights_l1));
+  CUDA_CHECK(cudaFree(d_weights_l2));
   CUDA_CHECK(cudaFree(d_output_l0));
+  CUDA_CHECK(cudaFree(d_output_l1));
+  CUDA_CHECK(cudaFree(d_output_l2));
   CUDA_CHECK(cudaFree(d_bias_l0));
+  CUDA_CHECK(cudaFree(d_bias_l1));
+  CUDA_CHECK(cudaFree(d_bias_l2));
 
   return 0;
 }

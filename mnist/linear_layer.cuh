@@ -22,8 +22,8 @@ constexpr int WMMA_K = 16;
   } while (0)
 
 template <bool ReLU>
-__global__ void linear_layer_forward(const half *a, const half *b,
-                                     const float *bias, half *c, int M, int K,
+__global__ void linear_layer_forward(const float *a, const half *b,
+                                     const float *bias, float *c, int M, int K,
                                      int N) {
   // Each warp computes a 16x16 output tile
   // Calculate the warp's position
@@ -37,13 +37,26 @@ __global__ void linear_layer_forward(const half *a, const half *b,
       b_frag;
   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
-  // Initialize accumulator with bias values
-  wmma::load_matrix_sync(c_frag, bias + warpN * WMMA_N, N, wmma::mem_row_major);
+  // Broadcast the bias across each row of the 16x16 tile
+  float bias_local[WMMA_M * WMMA_N];
+  for (int row = 0; row < WMMA_M; ++row) {
+    for (int col = 0; col < WMMA_N; ++col) {
+      bias_local[row * WMMA_N + col] = bias[warpN * WMMA_N + col];
+    }
+  }
+  wmma::load_matrix_sync(c_frag, bias_local, WMMA_N, wmma::mem_row_major);
 
   // Loop over K dimension
   for (int i = 0; i < K; i += WMMA_K) {
-    // Load the inputs
-    wmma::load_matrix_sync(a_frag, a + warpM * WMMA_M * K + i, K);
+    // Convert float input to half and load into fragment
+    half a_half[WMMA_M * WMMA_K];
+    const float* a_tile = a + warpM * WMMA_M * K + i;
+    for (int idx = 0; idx < WMMA_M; idx++) {
+      for (int jdx = 0; jdx < WMMA_K; jdx++) {
+        a_half[idx * WMMA_K + jdx] = __float2half(a_tile[idx * K + jdx]);
+      }
+    }
+    wmma::load_matrix_sync(a_frag, a_half, WMMA_K);
     wmma::load_matrix_sync(b_frag, b + i * N + warpN * WMMA_N, N);
 
     // Perform the matrix multiplication
@@ -51,13 +64,12 @@ __global__ void linear_layer_forward(const half *a, const half *b,
   }
 
   if (ReLU) {
-    // ReLU
     for (int i = 0; i < c_frag.num_elements; i++) {
       c_frag.x[i] = max(0.0f, c_frag.x[i]);
     }
   }
 
-  for (int i = 0; i < c_frag.num_elements; i++) {
-    c[warpM * WMMA_M * N + warpN * WMMA_N + i] = __float2half(c_frag.x[i]);
-  }
+  // Store the output directly as float
+  float* c_tile = c + (warpM * WMMA_M) * N + (warpN * WMMA_N);
+  wmma::store_matrix_sync(c_tile, c_frag, N, wmma::mem_row_major);
 }

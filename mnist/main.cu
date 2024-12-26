@@ -11,20 +11,35 @@
 // Helper function to upload weights and bias to GPU
 std::pair<half *, float *> uploadWeightsAndBias(const Tensor<float> &weights,
                                                 const Tensor<float> &bias) {
-  std::vector<half> h_weights(weights.size);
-  for (size_t i = 0; i < weights.size; i++) {
-    h_weights[i] = __float2half(weights.data[i]);
+  // Calculate padded dimensions to be multiples of 16
+  size_t padded_rows = (weights.shape[0] + WMMA_M - 1) / WMMA_M * WMMA_M;
+  size_t padded_cols = (weights.shape[1] + WMMA_N - 1) / WMMA_N * WMMA_N;
+  size_t padded_weights_size = padded_rows * padded_cols;
+
+  std::vector<half> h_weights(padded_weights_size, __float2half(0.0f));
+  
+  // Copy weights row by row, padding each row to multiple of 16
+  for (size_t i = 0; i < weights.shape[0]; i++) {
+    for (size_t j = 0; j < weights.shape[1]; j++) {
+      h_weights[i * padded_cols + j] = 
+        __float2half(weights.data[i * weights.shape[1] + j]);
+    }
   }
+
+  // Calculate padded bias size to be multiple of 16
+  size_t padded_bias_size = (bias.size + WMMA_N - 1) / WMMA_N * WMMA_N;
+  std::vector<float> padded_bias(padded_bias_size, 0.0f);
+  std::copy(bias.data.get(), bias.data.get() + bias.size, padded_bias.begin());
 
   half *d_weights;
   float *d_bias;
-  CUDA_CHECK(cudaMalloc(&d_weights, weights.size * sizeof(half)));
-  CUDA_CHECK(cudaMalloc(&d_bias, bias.size * sizeof(float)));
+  CUDA_CHECK(cudaMalloc(&d_weights, padded_weights_size * sizeof(half)));
+  CUDA_CHECK(cudaMalloc(&d_bias, padded_bias_size * sizeof(float)));
 
   CUDA_CHECK(cudaMemcpy(d_weights, h_weights.data(),
-                        h_weights.size() * sizeof(half),
+                        padded_weights_size * sizeof(half),
                         cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(d_bias, bias.data.get(), bias.size * sizeof(float),
+  CUDA_CHECK(cudaMemcpy(d_bias, padded_bias.data(), padded_bias_size * sizeof(float),
                         cudaMemcpyHostToDevice));
 
   return {d_weights, d_bias};
@@ -81,16 +96,11 @@ int main(int argc, char *argv[]) {
 
   const int NUM_CLASSES = 10;
 
-  // Convert tensors to half precision and allocate device memory
-  std::vector<half> h_images(stackedImages.size);
-  for (size_t i = 0; i < stackedImages.size; i++) {
-    h_images[i] = __float2half(stackedImages.data[i]);
-  }
-
-  half *d_images;
-  CUDA_CHECK(cudaMalloc(&d_images, stackedImages.size * sizeof(half)));
-  CUDA_CHECK(cudaMemcpy(d_images, h_images.data(),
-                        h_images.size() * sizeof(half),
+  // Allocate device memory for input images and copy data to device
+  float *d_images;
+  CUDA_CHECK(cudaMalloc(&d_images, stackedImages.size * sizeof(float)));
+  CUDA_CHECK(cudaMemcpy(d_images, stackedImages.data.get(),
+                        stackedImages.size * sizeof(float),
                         cudaMemcpyHostToDevice));
 
   const int BATCH_SIZE = stackedImages.shape[0]; // Number of images (25)
@@ -98,9 +108,9 @@ int main(int argc, char *argv[]) {
   const int NUM_FEATURES = l0w.shape[1];         // Output features (16)
 
   // Linear layer 0
-  half *d_output_l0;
+  float *d_output_l0;
   CUDA_CHECK(
-      cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(half)));
+      cudaMalloc(&d_output_l0, BATCH_SIZE * NUM_FEATURES * sizeof(float)));
 
   dim3 gridDim((BATCH_SIZE + WMMA_M - 1) / WMMA_M,
                (NUM_FEATURES + WMMA_N - 1) / WMMA_N);
@@ -112,83 +122,84 @@ int main(int argc, char *argv[]) {
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Add this code to print layer 0 output
-  std::vector<half> h_output_l0(BATCH_SIZE * NUM_FEATURES);
-  CUDA_CHECK(cudaMemcpy(h_output_l0.data(), d_output_l0,
-                        h_output_l0.size() * sizeof(half),
-                        cudaMemcpyDeviceToHost));
-  fmt::println("Layer 0 first 5 outputs:");
-  for (int i = 0; i < 5; ++i) {
-    fmt::print("{:.4f} ", __half2float(h_output_l0[i]));
-  }
-  fmt::println("\n");
-
-  half *d_output_l1;
+  float *d_output_l1;
   CUDA_CHECK(
-      cudaMalloc(&d_output_l1, BATCH_SIZE * NUM_FEATURES * sizeof(half)));
+      cudaMalloc(&d_output_l1, BATCH_SIZE * NUM_FEATURES * sizeof(float)));
   linear_layer_forward<true>
       <<<gridDim, blockDim>>>(d_output_l0, d_weights_l1, d_bias_l1, d_output_l1,
                               BATCH_SIZE, NUM_FEATURES, NUM_FEATURES);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Add this code to print layer 1 output
-  std::vector<half> h_output_l1(BATCH_SIZE * NUM_FEATURES);
-  CUDA_CHECK(cudaMemcpy(h_output_l1.data(), d_output_l1,
-                        h_output_l1.size() * sizeof(half),
-                        cudaMemcpyDeviceToHost));
-  fmt::println("Layer 1 first 5 outputs:");
-  for (int i = 0; i < 5; ++i) {
-    fmt::print("{:.4f} ", __half2float(h_output_l1[i]));
-  }
-  fmt::println("\n");
-
-  half *d_output_l2;
+  float *d_output_l2;
   CUDA_CHECK(
-      cudaMalloc(&d_output_l2, BATCH_SIZE * NUM_CLASSES * sizeof(half)));
+      cudaMalloc(&d_output_l2, BATCH_SIZE * /*NUM_CLASSES*/ NUM_FEATURES * sizeof(float)));
   linear_layer_forward<false>
       <<<gridDim, blockDim>>>(d_output_l1, d_weights_l2, d_bias_l2, d_output_l2,
-                              BATCH_SIZE, NUM_FEATURES, NUM_CLASSES);
+                              BATCH_SIZE, NUM_FEATURES, /*NUM_CLASSES*/ NUM_FEATURES);
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
 
-  // Add this code to print layer 2 output (before the existing output copy)
-  std::vector<half> h_output_l2(BATCH_SIZE * NUM_CLASSES);
-  CUDA_CHECK(cudaMemcpy(h_output_l2.data(), d_output_l2,
-                        h_output_l2.size() * sizeof(half),
+  // Add this code to print layer 0 output
+  std::vector<float> h_output_l0(BATCH_SIZE * NUM_FEATURES);
+  CUDA_CHECK(cudaMemcpy(h_output_l0.data(), d_output_l0,
+                        h_output_l0.size() * sizeof(float),
                         cudaMemcpyDeviceToHost));
-  fmt::println("Layer 2 first 5 outputs:");
-  for (int i = 0; i < 5; ++i) {
-    fmt::print("{:.4f} ", __half2float(h_output_l2[i]));
+  fmt::println("Layer 0 first 5 outputs:");
+  for (int i = 0; i < 32; ++i) {
+    if (i == 16) {
+      fmt::println("");
+    }
+    fmt::print("{:.4f} ", h_output_l0[i]);
   }
   fmt::println("\n");
 
-  // Copy result back to host
-  std::vector<half> h_output(BATCH_SIZE * NUM_CLASSES);
-  CUDA_CHECK(cudaMemcpy(h_output.data(), d_output_l2,
-                        h_output.size() * sizeof(half),
+  // Add this code to print layer 1 output
+  std::vector<float> h_output_l1(BATCH_SIZE * NUM_FEATURES);
+  CUDA_CHECK(cudaMemcpy(h_output_l1.data(), d_output_l1,
+                        h_output_l1.size() * sizeof(float),
                         cudaMemcpyDeviceToHost));
+  fmt::println("Layer 1 first 5 outputs:");
+  for (int i = 0; i < 32; ++i) {
+    if (i == 16) {
+      fmt::println("");
+    }
+    fmt::print("{:.4f} ", h_output_l1[i]);
+  }
+  fmt::println("\n");
+
+  // Add this code to print layer 2 output (before the existing output copy)
+  std::vector<float> h_output_l2(BATCH_SIZE * /*NUM_CLASSES*/ NUM_FEATURES);
+  CUDA_CHECK(cudaMemcpy(h_output_l2.data(), d_output_l2,
+                        h_output_l2.size() * sizeof(float),
+                        cudaMemcpyDeviceToHost));
+  fmt::println("Layer 2 first 5 outputs:");
+  for (int i = 0; i < 32; ++i) {
+    if (i == 16) {
+      fmt::println("");
+    }
+    fmt::print("{:.4f} ", h_output_l2[i]);
+  }
+  fmt::println("\n");
 
   // Print first few elements of result
   fmt::println("Predictions vs Labels:");
   for (int i = 0; i < BATCH_SIZE; ++i) {
     // Find argmax for predictions
     int pred_class = 0;
-    float max_val = __half2float(h_output[i * NUM_CLASSES]);
-    for (int j = 1; j < NUM_CLASSES; ++j) {
-      float val = __half2float(h_output[i * NUM_CLASSES + j]);
-      fmt::print("{} ", val);
+    float max_val = h_output_l2[i * NUM_FEATURES];
+    for (int j = 1; j < NUM_FEATURES; ++j) {
+      float val = h_output_l2[i * NUM_FEATURES + j];
+      //fmt::print("{} ", val);
       if (val > max_val) {
         max_val = val;
         pred_class = j;
       }
     }
-    fmt::println("");
+    //fmt::println("");
 
     fmt::print("Image {}: Predicted {} | Actual {}\n", i, pred_class, rawValidationLabels[i].argmax(0).data[0]);
   }
-
-  fmt::println("Raw validation labels tensor shape: {}", rawValidationLabels[0].shape);
 
   // Cleanup
   CUDA_CHECK(cudaFree(d_images));
